@@ -13,12 +13,17 @@ Example
 More examples are located in the 'example/' directory of this package.
 
 ~~~dart
-final Uri fileUri = new Uri.file('/Users/test/');
+import "dart:async";
+import "package:cache/cache.dart";
 
-await Cache.addFile(fileUri);
+Future<Null> main() async {
+  final Uri fileUri = new Uri.file('/Users/test/');
 
-final String fileContents = await Cache.matchFile(fileUri);
-print(fileContents);
+  await Cache.addFile(fileUri);
+
+  final String fileContents = await Cache.matchFile(fileUri);
+  print(fileContents);
+}
 ~~~
 
 
