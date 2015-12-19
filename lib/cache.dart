@@ -2,6 +2,7 @@ library Cache;
 
 import "dart:io";
 import "dart:async";
+import "dart:math" as math;
 import "dart:isolate" as iso;
 
 /**
@@ -11,6 +12,7 @@ import "dart:isolate" as iso;
  * > returns:
  *    - String filePath
  *    - String fileContents
+ *    - String fileModified
  *
  */
 enum isoCmds {
@@ -19,12 +21,14 @@ enum isoCmds {
 
 class Cache {
   //static final Map<String, String> _httpCache = <String, String>{}; // Isn't being used right now.
-  static final Map<String, String> _fileCache = <String, String>{};
+  static final Map<String, String> _fileCache = <String, String>{}; // {FilePath: FileContents}
+  static final Map<String, String> _fileCacheModifiedId = <String, String>{}; // {FilePath: FileModified}
+  static final Map<String, Completer> _isolateWaitingCompleterQueue = <String, Completer>{};
   static bool shouldBeVerbose = false;
   static iso.SendPort _isoSendPort;
   static bool _isAlreadyEstablishingIsolateConnection = false; /// Is _init() already in the process of connecting to the Isolate?
   static Duration timerIntervalWaitingForIsolateConnection = const Duration(milliseconds: 50);
-  static Duration timeToWaitForIsolateConnection = const Duration(milliseconds: 1000);
+  static Duration maxTimeToWaitForIsolateConnection = const Duration(milliseconds: 2000);
 
   static Future<Null> _init() async {
     if (Cache.shouldBeVerbose) print('Cache::_init()');
@@ -59,7 +63,7 @@ class Cache {
         stopWatch.stop();
 
         completer.complete();
-      } else if (stopWatch.elapsedMilliseconds > Cache.timeToWaitForIsolateConnection.inMilliseconds) {
+      } else if (stopWatch.elapsedMilliseconds > Cache.maxTimeToWaitForIsolateConnection.inMilliseconds) {
         timer.cancel();
         stopWatch.stop();
 
@@ -75,10 +79,23 @@ class Cache {
 
     switch (isoMessage['cmd'] as isoCmds) {
       case isoCmds.READ_FILE:
+        if (Cache.shouldBeVerbose) print('cmd = isoCmds.READ_FILE');
+
+        final String uniqueId = isoMessage['id'];
         final String filePath = isoMessage['data']['filePath'];
         final String fileContents = isoMessage['data']['fileContents'];
+        final String fileModified = isoMessage['data']['fileModified'];
 
         Cache._fileCache[filePath] = fileContents;
+        Cache._fileCacheModifiedId[filePath] = fileModified;
+
+        // Was there a completer waiting for this Isolate/Thread to return a response?
+        if (Cache._isolateWaitingCompleterQueue.containsKey(uniqueId)) {
+          if (Cache.shouldBeVerbose) print('Fulfilling a queued Future after getting a response from the Isolate.');
+
+          Cache._isolateWaitingCompleterQueue[uniqueId].complete();
+        }
+
         break;
     }
   }
@@ -93,27 +110,44 @@ class Cache {
   }) async {
     if (Cache.shouldBeVerbose) print('Cache::addFile(Uri)');
 
+    final Completer<Null> completer = new Completer<Null>();
     final String filePath = resourceFile.toFilePath();
 
     // If this has already been added to the cache, do nothing and return.
     if (Cache._fileCache.containsKey(filePath)) {
-      return;
-    }
-
-    if (shouldPreCache) {
-      if (Cache._isoSendPort == null) {
-        await Cache._init();
-      }
-
-      Cache._isoSendPort.send(<String, dynamic>{
-        "cmd": isoCmds.READ_FILE,
-        "data": {
-          "filePath": filePath
-        }
-      });
+      completer.complete();
     } else {
-      Cache._fileCache[filePath] = null;
+      if (shouldPreCache) {
+        if (Cache._isoSendPort == null) {
+          await Cache._init();
+        }
+
+        // Generate a unique Id for indexing the Completer at for having the Isolate response
+        // handler complete it when it gets a value from the Isolate.
+        final String _uniqueId = Cache._generateUniqueId();
+
+        // Set the Completer at its index
+        Cache._isolateWaitingCompleterQueue[_uniqueId] = completer;
+
+        // Message the Isolate to read the file
+        Cache._isoSendPort.send(<String, dynamic>{
+          "cmd": isoCmds.READ_FILE,
+          "id": _uniqueId,
+          "data": {
+            "filePath": filePath
+          }
+        });
+      } else {
+        // Create an entry that this file should be cached, but the contents are not known yet
+        // (either caching in separate thread or waiting until the file is first wanted before
+        // reading and caching)
+        Cache._fileCache[filePath] = null;
+
+        completer.complete();
+      }
     }
+
+    return completer.future;
   }
 
   static Future<Null> addAllFiles(final List<Uri> uriList, {
@@ -137,18 +171,38 @@ class Cache {
     final String filePath = resourceUri.toFilePath();
 
     if (Cache._fileCache.containsKey(filePath)) {
-      // Has this file already been read and cached at this point?
-      if (Cache._fileCache[filePath] != null) {
-        if (Cache.shouldBeVerbose) print('Cache::matchFile(File) - Reading from a cached copy from memory');
+      final File _resourceFile = new File.fromUri(resourceUri);
+      final FileStat _fileStat = await _resourceFile.stat();
+      final String _fileModified = _fileStat.modified.toString();
+      final int _fileSize = _fileStat.size;
+      final String _fileStatComparisonStr = '$_fileModified.$_fileSize';
 
-        return Cache._fileCache[filePath];
+      // Has this file already been read and cached at this point?
+      if (Cache._fileCache[filePath] != null &&
+          Cache._fileCacheModifiedId[filePath] != null)
+      {
+        // Has this file changed since it was cached
+        if (_fileStatComparisonStr != Cache._fileCacheModifiedId[filePath]) {
+          if (Cache.shouldBeVerbose) print('Cache::matchFile(File) - Was going to read from a cached copy from memory, but the file updated and is being recached.');
+
+          final String _fileContents = await Cache._readFile(_resourceFile);
+
+          Cache._fileCache[filePath] = _fileContents;
+          Cache._fileCacheModifiedId[filePath] = _fileStatComparisonStr;
+
+          return _fileContents;
+        } else { // The file hasn't changed; read from memory.
+          if (Cache.shouldBeVerbose) print('Cache::matchFile(File) - Reading from a cached copy from memory');
+
+          return Cache._fileCache[filePath];
+        }
       } else {
         if (Cache.shouldBeVerbose) print('Cache::matchFile(File) - Reading freshly from the Filesystem');
 
-        final File _resourceFile = new File.fromUri(resourceUri);
         final String _fileContents = await Cache._readFile(_resourceFile);
 
         Cache._fileCache[filePath] = _fileContents;
+        Cache._fileCacheModifiedId[filePath] = _fileStatComparisonStr;
 
         return _fileContents;
       }
@@ -181,13 +235,19 @@ class Cache {
         switch (cmd) {
           case isoCmds.READ_FILE:
             final String filePath = messageFromMainThread['data']['filePath'];
-            final String fileContents = await Cache._readFile(new File(filePath));
+            final File _file = new File(filePath);
+            final String fileContents = await Cache._readFile(_file);
+            final FileStat fileStat = await _file.stat();
+            final String fileModified = fileStat.modified.toString();
+            final int fileSize = fileStat.size;
 
             sendPort.send(<String, dynamic>{
               'cmd': cmd,
+              'id': messageFromMainThread['id'],
               'data': <String, String>{
                 'filePath': filePath,
-                'fileContents': fileContents
+                'fileContents': fileContents,
+                'fileModified': '$fileModified.$fileSize'
               }
             });
             break;
@@ -202,5 +262,14 @@ class Cache {
 
     // Send the sendPort to the main thread to establish communication
     sendPort.send(receivePort.sendPort);
+  }
+
+  static String _generateUniqueId() {
+    final DateTime nowDateTime = new DateTime.now();
+    final int randomInt1 = new math.Random().nextInt(100000);
+    final int randomInt2 = new math.Random().nextInt(100000);
+    final int randomInt3 = new math.Random().nextInt(100000);
+
+    return '${nowDateTime}.$randomInt1.$randomInt2.$randomInt3';
   }
 }

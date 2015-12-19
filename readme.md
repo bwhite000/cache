@@ -17,7 +17,7 @@ import "dart:async";
 import "package:cache/cache.dart";
 
 Future<Null> main() async {
-  final Uri fileUri = new Uri.file('/Users/test/');
+  final Uri fileUri = new Uri.file('/Users/myself/Documents/test.txt');
 
   await Cache.addFile(fileUri);
 
@@ -31,3 +31,10 @@ Features and bugs
 -----------------
 
 Please file feature requests and bugs using the GitHub issue tracker for this repository.
+
+Using this package? Let me know!
+--------------------------------
+
+I am excited to see if other developers are able to make something with this package. If
+you have a project using it, please send me a quick email at the email address listed on
+my GitHub's main page. Thanks a bunch!

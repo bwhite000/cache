@@ -1,6 +1,27 @@
 Cache Changelog
 ===============
 
+v0.0.3 (12.19.2015)
+-----------------
+* __Cache:__ If the cached file has updated since it was cached, the cache will now be
+  updated with the new file contents.
+* __Cache:__ The `addFile()` method will now return a Future that will either complete
+  immediately for simply adding a file to be cached in the future, or complete later for
+  files set to be precached after the Isolate has read its data and stored it in memory;
+  e.g. no more having to add `Timer` after `addFile` to wait for it to hopefully Cache in
+  that time.
+* __Cache:__ In cases where a file's value is quickly changed more than once in the same
+  second, the file stat's modified value will still only be granular down to the second,
+  not part of that second, so the file size is being used to also check if the file's value
+  has changed in addition to the modified date value.
+* Various performance optimizations and fixes.
+* __Cache:__ Bumped up the `maxTimeToWaitForIsolateConnection` from 1 second to 2 seconds
+  to err on the safe side for the default value, even though the developer can bump it higher,
+  if needed.
+* __ReadMe:__ Update the code example and added a section asking for other developers to let
+  me know if the package is able to help them make a project using it.
+* __Example (basic_example.dart):__ Minor updates to code and comments for clarity.
+
 v0.0.2 (12.12.2015)
 -------------------
 * __Cache:__ Update addFile, addFiles, matchFile, \_init, and the Isolate communication to

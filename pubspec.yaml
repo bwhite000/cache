@@ -1,5 +1,5 @@
 name: cache
-version: 0.0.2
+version: 0.0.3
 author: Brandon White <jennexproject+cache@gmail.com>
 description: A Dart package for caching Files through a multi-threaded system.
 homepage: https://github.com/bwhite000/cache
