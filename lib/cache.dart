@@ -4,6 +4,7 @@ import "dart:io";
 import "dart:async";
 import "dart:math" as math;
 import "dart:isolate" as iso;
+import "dart:convert";
 
 /**
  * READ_FILE
@@ -219,7 +220,14 @@ class Cache {
     if (Cache.shouldBeVerbose) print('Cache::_readFile(File)');
 
     if (await file.exists()) {
-      return await file.readAsString();
+      try {
+        // read as UTF-8 by default
+        return await file.readAsString();
+      } catch (e){
+        // read file as LATIN1
+        return await file.readAsString(encoding: LATIN1);
+      }
+
     } else {
       throw new Exception('Cache::_readFile(File): The file path provided does not point to a file that exists (${file.uri.path})');
     }
