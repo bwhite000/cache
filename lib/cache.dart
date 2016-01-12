@@ -224,25 +224,25 @@ class Cache {
     if (await file.exists()) {
       final StringBuffer buffer = new StringBuffer();
 
-      try {
-        // Read as UTF-8 by default
-        file.openRead().transform(UTF8.decoder).listen((String data) {
-          buffer.write(data);
-        }, onDone: () {
-          completer.complete(buffer.toString());
-        }, onError: (err) {
+      // Read as UTF-8 by default
+      file.openRead().transform(UTF8.decoder).listen((String data) {
+        buffer.write(data);
+      }, onDone: () {
+        completer.complete(buffer.toString());
+      }, onError: (err) {
+        if (err is FormatException) {
+          // Read file as LATIN1
+          file.openRead().transform(LATIN1.decoder).listen((String data) {
+            buffer.write(data);
+          }, onDone: () {
+            completer.complete(buffer.toString());
+          }, onError: (err) {
+            throw err;
+          });
+        } else {
           throw err;
-        });
-      } catch (e) {
-        // Read file as LATIN1
-        file.openRead().transform(LATIN1.decoder).listen((String data) {
-          buffer.write(data);
-        }, onDone: () {
-          completer.complete(buffer.toString());
-        }, onError: (err) {
-          throw err;
-        });
-      }
+        }
+      });
     } else {
       throw new Exception('Cache::_readFile(File): The file path provided does not point to a file that exists (${file.uri.path})');
     }
