@@ -1,6 +1,16 @@
 Cache Changelog
 ===============
 
+v0.0.5 (1.12.2016)
+------------------
+* __Cache:__ Changed the `_readFile()` method to use an IOSink that can be closed out while
+  reading a file since the former usage of `readAsString()` was leaving too many filesystem
+  entities open and was throwing a top-level OS error.
+
+v0.0.4 (12.20.2015)
+-----------------
+* __Cache:__ Changes to \_readFile() to support reading non-utf-8 encoded filesystem files.
+
 v0.0.3 (12.19.2015)
 -----------------
 * __Cache:__ If the cached file has updated since it was cached, the cache will now be

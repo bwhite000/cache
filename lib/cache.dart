@@ -219,18 +219,35 @@ class Cache {
   static Future<String> _readFile(final File file) async {
     if (Cache.shouldBeVerbose) print('Cache::_readFile(File)');
 
-    if (await file.exists()) {
-      try {
-        // read as UTF-8 by default
-        return await file.readAsString();
-      } catch (e){
-        // read file as LATIN1
-        return await file.readAsString(encoding: LATIN1);
-      }
+    final Completer<String> completer = new Completer<String>();
 
+    if (await file.exists()) {
+      final StringBuffer buffer = new StringBuffer();
+
+      try {
+        // Read as UTF-8 by default
+        file.openRead().transform(UTF8.decoder).listen((String data) {
+          buffer.write(data);
+        }, onDone: () {
+          completer.complete(buffer.toString());
+        }, onError: (err) {
+          throw err;
+        });
+      } catch (e) {
+        // Read file as LATIN1
+        file.openRead().transform(LATIN1.decoder).listen((String data) {
+          buffer.write(data);
+        }, onDone: () {
+          completer.complete(buffer.toString());
+        }, onError: (err) {
+          throw err;
+        });
+      }
     } else {
       throw new Exception('Cache::_readFile(File): The file path provided does not point to a file that exists (${file.uri.path})');
     }
+
+    return completer.future;
   }
 
   static void _isolateEntryPoint(final iso.SendPort sendPort) {
