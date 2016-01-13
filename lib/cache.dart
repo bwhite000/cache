@@ -221,9 +221,9 @@ class Cache {
 
     if (await file.exists()) {
       String _fileContents;
-      final RandomAccessFile fileRead = await file.open();
+      final RandomAccessFile fileRead = file.openSync();
       final List<int> bytes = await fileRead.readSync(await fileRead.length());
-      await fileRead.close();
+      await fileRead.closeSync();
 
       try {
         _fileContents = UTF8.decode(bytes);
