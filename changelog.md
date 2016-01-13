@@ -6,6 +6,8 @@ v0.0.5 (1.12.2016)
 * __Cache:__ Changed the `_readFile()` method to use an IOSink that can be closed out while
   reading a file since the former usage of `readAsString()` was leaving too many filesystem
   entities open and was throwing a top-level OS error.
+* __Cache:__ Added a file reading queueing system to help with issues of holding too many
+  file connections open simultaneously.
 
 v0.0.4 (12.20.2015)
 -----------------

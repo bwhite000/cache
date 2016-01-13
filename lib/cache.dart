@@ -219,42 +219,22 @@ class Cache {
   static Future<String> _readFile(final File file) async {
     if (Cache.shouldBeVerbose) print('Cache::_readFile(File)');
 
-    final Completer<String> completer = new Completer<String>();
-
     if (await file.exists()) {
-      final StringBuffer buffer = new StringBuffer();
+      String _fileContents;
+      final RandomAccessFile fileRead = await file.open();
+      final List<int> bytes = await fileRead.read(await fileRead.length());
+      await fileRead.close();
 
-      // Read as UTF-8 by default
-      file.openRead().transform(UTF8.decoder).listen((String data) {
-        buffer.write(data);
-      }, onDone: () {
-        completer.complete(buffer.toString());
+      try {
+        _fileContents = UTF8.decode(bytes);
+      } on FormatException catch (err) {
+        _fileContents = LATIN1.decode(bytes);
+      }
 
-        // Clean up the buffer pieces for good measure.
-        buffer.clear();
-      }, onError: (err) {
-        // If there was a FormatException with the UTF8 reading, try reading as Latin1.
-        if (err is FormatException) {
-          // Read file as LATIN1
-          file.openRead().transform(LATIN1.decoder).listen((String data) {
-            buffer.write(data);
-          }, onDone: () {
-            completer.complete(buffer.toString());
-
-            // Clean up the buffer pieces for good measure.
-            buffer.clear();
-          }, onError: (err) {
-            throw err;
-          });
-        } else {
-          throw err;
-        }
-      });
+      return _fileContents;
     } else {
       throw new Exception('Cache::_readFile(File): The file path provided does not point to a file that exists (${file.uri.path})');
     }
-
-    return completer.future;
   }
 
   static const int MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS = 500;
