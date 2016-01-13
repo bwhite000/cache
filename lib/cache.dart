@@ -229,13 +229,20 @@ class Cache {
         buffer.write(data);
       }, onDone: () {
         completer.complete(buffer.toString());
+
+        // Clean up the buffer pieces for good measure.
+        buffer.clear();
       }, onError: (err) {
+        // If there was a FormatException with the UTF8 reading, try reading as Latin1.
         if (err is FormatException) {
           // Read file as LATIN1
           file.openRead().transform(LATIN1.decoder).listen((String data) {
             buffer.write(data);
           }, onDone: () {
             completer.complete(buffer.toString());
+
+            // Clean up the buffer pieces for good measure.
+            buffer.clear();
           }, onError: (err) {
             throw err;
           });
@@ -250,8 +257,12 @@ class Cache {
     return completer.future;
   }
 
+  static const int MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS = 500;
+
   static void _isolateEntryPoint(final iso.SendPort sendPort) {
     if (Cache.shouldBeVerbose) print('Cache::_isolateEntryPoint(SendPort)');
+
+    int numberOfOpenFileConnections = 0;
 
     final iso.ReceivePort receivePort = new iso.ReceivePort()
       ..listen((final Map<String, dynamic> messageFromMainThread) async {
@@ -261,20 +272,56 @@ class Cache {
           case isoCmds.READ_FILE:
             final String filePath = messageFromMainThread['data']['filePath'];
             final File _file = new File(filePath);
-            final String fileContents = await Cache._readFile(_file);
+
             final FileStat fileStat = await _file.stat();
             final String fileModified = fileStat.modified.toString();
             final int fileSize = fileStat.size;
 
-            sendPort.send(<String, dynamic>{
-              'cmd': cmd,
-              'id': messageFromMainThread['id'],
-              'data': <String, String>{
-                'filePath': filePath,
-                'fileContents': fileContents,
-                'fileModified': '$fileModified.$fileSize'
-              }
-            });
+            // Temporarily: don't read a file if more than 500 other file connections are
+            // already open; wait instead.
+            if (numberOfOpenFileConnections >= Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
+              final Stopwatch stopWatch = new Stopwatch()..start();
+              final int maxMsToWait = 30000; // Temporary fix: 30s
+
+              new Timer.periodic(const Duration(milliseconds: 200), (final Timer timer) async {
+                // Cancel if the max timeout has been reached.
+                if (stopWatch.elapsedMilliseconds > maxMsToWait) {
+                  stopWatch.stop();
+                  timer.cancel();
+                }
+
+                if (numberOfOpenFileConnections < Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
+                  numberOfOpenFileConnections++; // Increment the number of open file connections.
+                  final String _fileContents = await Cache._readFile(_file);
+                  numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
+
+                  sendPort.send(<String, dynamic>{
+                    'cmd': cmd,
+                    'id': messageFromMainThread['id'],
+                    'data': <String, String>{
+                      'filePath': filePath,
+                      'fileContents': _fileContents,
+                      'fileModified': '$fileModified.$fileSize'
+                    }
+                  });
+                }
+              });
+            } else {
+              numberOfOpenFileConnections++; // Increment the number of open file connections.
+              final String _fileContents = await Cache._readFile(_file);
+              numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
+
+              sendPort.send(<String, dynamic>{
+                'cmd': cmd,
+                'id': messageFromMainThread['id'],
+                'data': <String, String>{
+                  'filePath': filePath,
+                  'fileContents': _fileContents,
+                  'fileModified': '$fileModified.$fileSize'
+                }
+              });
+            }
+
             break;
 
           default:
