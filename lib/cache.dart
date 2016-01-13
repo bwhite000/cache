@@ -222,7 +222,7 @@ class Cache {
     if (await file.exists()) {
       String _fileContents;
       final RandomAccessFile fileRead = await file.open();
-      final List<int> bytes = await fileRead.read(await fileRead.length());
+      final List<int> bytes = await fileRead.readSync(await fileRead.length());
       await fileRead.close();
 
       try {
