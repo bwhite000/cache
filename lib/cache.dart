@@ -4,7 +4,7 @@ import "dart:io";
 import "dart:async";
 import "dart:math" as math;
 import "dart:isolate" as iso;
-import "dart:convert";
+import "package:dart2_constant/convert.dart" as convert;
 
 /**
  * READ_FILE
@@ -226,9 +226,9 @@ class Cache {
       await fileRead.closeSync();
 
       try {
-        _fileContents = UTF8.decode(bytes);
-      } on FormatException catch (err) {
-        _fileContents = LATIN1.decode(bytes);
+        _fileContents = convert.utf8.decode(bytes);
+      } on FormatException {
+        _fileContents = convert.latin1.decode(bytes);
       }
 
       return _fileContents;
@@ -245,70 +245,74 @@ class Cache {
     int numberOfOpenFileConnections = 0;
 
     final iso.ReceivePort receivePort = new iso.ReceivePort()
-      ..listen((final Map<String, dynamic> messageFromMainThread) async {
-        final isoCmds cmd = messageFromMainThread['cmd'];
+      ..listen((final dynamic messageFromMainThread) async {
+        if (messageFromMainThread is Map<String, dynamic>) {
+          final isoCmds cmd = messageFromMainThread['cmd'];
 
-        switch (cmd) {
-          case isoCmds.READ_FILE:
-            final String filePath = messageFromMainThread['data']['filePath'];
-            final File _file = new File(filePath);
+          switch (cmd) {
+            case isoCmds.READ_FILE:
+              final String filePath = messageFromMainThread['data']['filePath'];
+              final File _file = new File(filePath);
 
-            final FileStat fileStat = await _file.stat();
-            final String fileModified = fileStat.modified.toString();
-            final int fileSize = fileStat.size;
+              final FileStat fileStat = await _file.stat();
+              final String fileModified = fileStat.modified.toString();
+              final int fileSize = fileStat.size;
 
-            // Temporarily: don't read a file if more than 500 other file connections are
-            // already open; wait instead.
-            if (numberOfOpenFileConnections >= Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
-              final Stopwatch stopWatch = new Stopwatch()..start();
-              final int maxMsToWait = 30000; // Temporary fix: 30s
+              // Temporarily: don't read a file if more than 500 other file connections are
+              // already open; wait instead.
+              if (numberOfOpenFileConnections >= Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
+                final Stopwatch stopWatch = new Stopwatch()
+                  ..start();
+                final int maxMsToWait = 30000; // Temporary fix: 30s
 
-              new Timer.periodic(const Duration(milliseconds: 200), (final Timer timer) async {
-                // Cancel if the max timeout has been reached.
-                if (stopWatch.elapsedMilliseconds > maxMsToWait) {
-                  stopWatch.stop();
-                  timer.cancel();
-                }
+                new Timer.periodic(const Duration(milliseconds: 200), (final Timer timer) async {
+                  // Cancel if the max timeout has been reached.
+                  if (stopWatch.elapsedMilliseconds > maxMsToWait) {
+                    stopWatch.stop();
+                    timer.cancel();
+                  }
 
-                if (numberOfOpenFileConnections < Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
-                  numberOfOpenFileConnections++; // Increment the number of open file connections.
-                  final String _fileContents = await Cache._readFile(_file);
-                  numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
+                  if (numberOfOpenFileConnections < Cache.MAX_NUMBER_OF_CONCURRENT_FILE_CONNECTIONS) {
+                    numberOfOpenFileConnections++; // Increment the number of open file connections.
+                    final String _fileContents = await Cache._readFile(_file);
+                    numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
 
-                  sendPort.send(<String, dynamic>{
-                    'cmd': cmd,
-                    'id': messageFromMainThread['id'],
-                    'data': <String, String>{
-                      'filePath': filePath,
-                      'fileContents': _fileContents,
-                      'fileModified': '$fileModified.$fileSize'
-                    }
-                  });
-                }
-              });
-            } else {
-              numberOfOpenFileConnections++; // Increment the number of open file connections.
-              final String _fileContents = await Cache._readFile(_file);
-              numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
+                    sendPort.send(<String, dynamic>{
+                      'cmd': cmd,
+                      'id': messageFromMainThread['id'],
+                      'data': <String, String>{
+                        'filePath': filePath,
+                        'fileContents': _fileContents,
+                        'fileModified': '$fileModified.$fileSize'
+                      }
+                    });
+                  }
+                });
+              } else {
+                numberOfOpenFileConnections++; // Increment the number of open file connections.
+                final String _fileContents = await Cache._readFile(_file);
+                numberOfOpenFileConnections--; // Decrement the number of open file connections since the task has completed.
 
-              sendPort.send(<String, dynamic>{
-                'cmd': cmd,
-                'id': messageFromMainThread['id'],
-                'data': <String, String>{
-                  'filePath': filePath,
-                  'fileContents': _fileContents,
-                  'fileModified': '$fileModified.$fileSize'
-                }
-              });
-            }
+                sendPort.send(<String, dynamic>{
+                  'cmd': cmd,
+                  'id': messageFromMainThread['id'],
+                  'data': <String, String>{
+                    'filePath': filePath,
+                    'fileContents': _fileContents,
+                    'fileModified': '$fileModified.$fileSize'
+                  }
+                });
+              }
 
-            break;
+              break;
 
-          default:
-            if (Cache.shouldBeVerbose) {
-              print('Cache::_isolateEntryPoint(SendPort) - Unmatched "cmd" value in the messaged passed to this Isolate');
-              print(messageFromMainThread);
-            }
+            default:
+              if (Cache.shouldBeVerbose) {
+                print(
+                    'Cache::_isolateEntryPoint(SendPort) - Unmatched "cmd" value in the messaged passed to this Isolate');
+                print(messageFromMainThread);
+              }
+          }
         }
       });
 
